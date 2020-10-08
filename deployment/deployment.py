@@ -78,17 +78,12 @@ def input_fn(input_data, content_type):
     by looking at how many columns were provided.
     """
     logging.info(f"the payload content is {input_data}")
-    if content_type == 'text/csv':
-        df = pd.read_csv(StringIO(input_data), 
-                         header=None)
-        
-        parsed_payload = df.values
-        input_payload = parsed_payload.reshape(1,-1)
-        logging.info(f"the shape of input_data is {input_payload.shape}")
-        logging.info(f"the ndim of input_data is {input_payload.ndim}")
-        logging.info(f"the input content is {input_payload}")
-
-        return input_payload
+    items = [ float(item)  for item in input_data.split(',')]  
+    input_pr = np.array(items).reshape(1,-1)
+    logging.info(f"the payload content is {input_pr}")
+    
+    return input_pr
+    
 
      
 def predict_fn(input_data, model):
