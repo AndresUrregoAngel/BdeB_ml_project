@@ -6,15 +6,41 @@ import os
 import pickle
 import boto3
 import logging
-from sklearn.model_selection import KFold
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
 from io import StringIO
 from joblib import dump, load
 from sagemaker_containers.beta.framework import (
     content_types, encoders, env, modules, transformer, worker)
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _customPreprocessing(X):
+    logging.info("starting the custom process for data preprocessing")
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    scaler = "standard_scaler_fit"
+    localscaler = f"{dir_path}/{scaler}"
+    pca = "pca_fit"
+    localpca = f"{dir_path}/{pca}"
+    
+    s3cli = boto3.client("s3")
+    logging.info("download config scaler and pca")
+    s3cli.download_file("bucket",f"mlproject/configs/{scaler}", localscaler)
+    s3cli.download_file("bucket",f"mlproject/configs/{pca}", localpca)
+    
+    logging.info(f"payload to be scaled and reduced {X}")
+    logging.info("load config files for return")
+    scaler_processing = load(localscaler)
+    pca_processing = load(localpca)
+    
+    X_sc = scaler_processing.transform(X)
+    logging.info(f"data has been scaled as : {X_sc}")
+    X_pca = pca_processing.transform(X_sc)
+    logging.info(f"input features after pca : {X_pca}")
+    
+    return X_pca
+    
 
 if __name__ == '__main__':
     
@@ -51,19 +77,15 @@ if __name__ == '__main__':
   
       
     # Split datasets
-    n_splits=5
-    kf = KFold(n_splits=n_splits,shuffle=True,random_state=1)
-      
-    for train_index,test_index in kf.split(X):
-        X_train, X_test = X.iloc[train_index],X.iloc[test_index]
-        y_train, y_test = y[train_index],y[test_index]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
 
     # Here we support a single hyperparameter, 'max_leaf_nodes'. Note that you can add as many
     # as your training my require in the ArgumentParser above.
     # max_leaf_nodes = args.max_leaf_nodes
-    print(X_train.shape)
+    logging.info(f"the current shape for the features dataset is {X_train.shape}")
     # Now use scikit-learn's decision tree classifier to train the model.
-    clf = LogisticRegression()
+    clf = DecisionTreeClassifier(max_depth=3)
+#     X_normalized = _customPreprocessing(X_train)
     clf = clf.fit(X_train, y_train)
 
     # Print the coefficients of the trained classifier, and save the coefficients
@@ -80,9 +102,10 @@ def input_fn(input_data, content_type):
     logging.info(f"the payload content is {input_data}")
     items = [ float(item)  for item in input_data.split(',')]  
     input_pr = np.array(items).reshape(1,-1)
-    logging.info(f"the payload content is {input_pr}")
+    X_normalized = _customPreprocessing(input_pr)
+    logging.info(f"the payload content normalized is {X_normalized}")
     
-    return input_pr
+    return X_normalized
     
 
      
@@ -93,10 +116,11 @@ def predict_fn(input_data, model):
     The output is returned in the following order:
         rest of features either one hot encoded or standardized
     """
+  
     prediction = model.predict(input_data)
     pred_prob = model.predict_proba(input_data)
-    
-    return prediction
+   
+    return pred_prob
     
 def output_fn(prediction, accept):
     """Format prediction output
